@@ -149,7 +149,3 @@ cython_debug/
 
 # PyCharm/JetBrains
 .idea/
-
-# Recordings and backups
-recordings/
-backup/
