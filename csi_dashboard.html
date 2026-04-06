@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CSI Live Monitor</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #0a0e1a;
+            color: #e0e6f0;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 24px;
+        }
+
+        h1 {
+            font-size: 1.4rem;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            color: #8ab4f8;
+            margin-bottom: 16px;
+        }
+
+        .status-bar {
+            display: flex;
+            gap: 24px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .stat {
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 10px;
+            padding: 10px 20px;
+            text-align: center;
+            min-width: 120px;
+            transition: border-color 0.3s;
+        }
+
+        .stat .label {
+            font-size: 0.65rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #7a8ba8;
+            margin-bottom: 4px;
+        }
+
+        .stat .value {
+            font-size: 1.3rem;
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .stat-state { min-width: 160px; }
+        .stat-state .value { font-size: 1.6rem; transition: color 0.3s; }
+
+        #connection-dot {
+            display: inline-block;
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: #ef4444;
+            margin-right: 6px;
+            vertical-align: middle;
+            transition: background 0.3s;
+        }
+        #connection-dot.connected { background: #22c55e; }
+
+        .chart-container {
+            width: 100%;
+            max-width: 1200px;
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 14px;
+            padding: 20px;
+            margin-bottom: 16px;
+        }
+
+        .chart-container h2 {
+            font-size: 0.85rem;
+            font-weight: 400;
+            color: #7a8ba8;
+            margin-bottom: 10px;
+        }
+
+        canvas { width: 100%; height: 500px; display: block; }
+
+        .controls {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 20px;
+            align-items: center;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        button {
+            background: rgba(138,180,248,0.15);
+            color: #8ab4f8;
+            border: 1px solid rgba(138,180,248,0.3);
+            padding: 8px 18px;
+            border-radius: 8px;
+            font-family: 'Inter', sans-serif;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        button:hover { background: rgba(138,180,248,0.25); }
+        button.active { background: rgba(255,200,50,0.2); color: #ffd666; border-color: rgba(255,200,50,0.4); }
+
+        select, input {
+            background: rgba(255,255,255,0.06);
+            color: #e0e6f0;
+            border: 1px solid rgba(255,255,255,0.12);
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-family: 'Inter', sans-serif;
+            font-size: 0.8rem;
+        }
+
+        .cal-banner {
+            width: 100%;
+            max-width: 1200px;
+            background: rgba(255,200,50,0.1);
+            border: 1px solid rgba(255,200,50,0.3);
+            border-radius: 10px;
+            padding: 14px 20px;
+            margin-bottom: 16px;
+            text-align: center;
+            font-size: 0.9rem;
+            color: #ffd666;
+            display: none;
+        }
+        .cal-banner .progress {
+            height: 4px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 4px;
+            margin-top: 8px;
+            overflow: hidden;
+        }
+        .cal-banner .progress-fill {
+            height: 100%;
+            background: #ffd666;
+            border-radius: 4px;
+            transition: width 0.3s;
+        }
+
+        .footer { margin-top: 16px; font-size: 0.7rem; color: #4a5568; }
+    </style>
+</head>
+<body>
+
+<h1><span id="connection-dot"></span> CSI Live Monitor — Moving Var CV</h1>
+
+<div class="cal-banner" id="cal-banner">
+    ⏳ CALIBRATING — keep the room still...
+    <span id="cal-text"></span>
+    <div class="progress"><div class="progress-fill" id="cal-fill"></div></div>
+</div>
+
+<div class="status-bar">
+    <div class="stat stat-state" id="state-box">
+        <div class="label">State</div>
+        <div class="value" id="state">—</div>
+    </div>
+    <div class="stat">
+        <div class="label">Frames/s</div>
+        <div class="value" id="fps">—</div>
+    </div>
+    <div class="stat">
+        <div class="label">RSSI</div>
+        <div class="value" id="rssi">—</div>
+    </div>
+    <div class="stat">
+        <div class="label">Threshold</div>
+        <div class="value" id="thresh-display" style="color:#ff6b6b;">—</div>
+    </div>
+    <div class="stat">
+        <div class="label">Moving Var CV</div>
+        <div class="value" id="mvcv" style="color:#ff6b6b;">—</div>
+    </div>
+</div>
+
+<div class="controls">
+    <label style="font-size:0.8rem; color:#7a8ba8;">WS Port:</label>
+    <input type="number" id="ws-port" value="8099" style="width:80px;">
+    <button id="btn-connect">Connect</button>
+    <button id="btn-recalibrate">⟲ Recalibrate</button>
+    <button id="btn-clear">Clear Chart</button>
+    <label style="font-size:0.8rem; color:#7a8ba8;">Window:</label>
+    <select id="window-size">
+        <option value="200">200 pts</option>
+        <option value="500" selected>500 pts</option>
+        <option value="1500">1500 pts</option>
+        <option value="3000">3000 pts</option>
+    </select>
+    <label style="font-size:0.8rem; color:#7a8ba8;">Y-Max:</label>
+    <select id="y-max">
+        <option value="0.005">0.005</option>
+        <option value="0.01" selected>0.01</option>
+        <option value="0.02">0.02</option>
+        <option value="0.05">0.05</option>
+        <option value="0.1">0.1</option>
+    </select>
+    <label style="font-size:0.8rem; color:#7a8ba8;">Cal (s):</label>
+    <input type="number" id="cal-seconds" value="10" min="3" max="60" style="width:60px;">
+</div>
+
+<div class="chart-container">
+    <h2>Moving Variance of CV — <span style="color:#ff6b6b;">red dashed = auto-calculated threshold</span></h2>
+    <canvas id="chart-mvcv"></canvas>
+</div>
+
+<div class="footer">CSI Live Monitor — demo tool</div>
+
+<script>
+    // ── State ──
+    let ws = null;
+    let values = [];
+    let maxPoints = 500;
+    let yMax = 0.01;
+    let threshold = null; // null = not yet calibrated
+    let frameCount = 0;
+    let lastFpsTime = performance.now();
+    let lastFpsCount = 0;
+
+    // Calibration
+    let calActive = true;
+    let calStartTime = null;
+    let calDuration = 10; // seconds
+    let calBuffer = [];
+
+    const STATE_COLORS = {
+        'CALIBRATING': { text: '#ffd666', border: 'rgba(255,200,50,0.4)' },
+        'ABSENT':      { text: '#22c55e', border: 'rgba(34,197,94,0.4)' },
+        'MOVING':      { text: '#f97316', border: 'rgba(249,115,22,0.4)' },
+    };
+
+    // ── DOM ──
+    const dot = document.getElementById('connection-dot');
+    const elFps = document.getElementById('fps');
+    const elRssi = document.getElementById('rssi');
+    const elMvcv = document.getElementById('mvcv');
+    const elState = document.getElementById('state');
+    const elStateBox = document.getElementById('state-box');
+    const elThresh = document.getElementById('thresh-display');
+    const canvas = document.getElementById('chart-mvcv');
+    const calBanner = document.getElementById('cal-banner');
+    const calText = document.getElementById('cal-text');
+    const calFill = document.getElementById('cal-fill');
+
+    document.getElementById('btn-connect').onclick = connect;
+    document.getElementById('btn-clear').onclick = () => { values = []; };
+    document.getElementById('btn-recalibrate').onclick = startCalibration;
+    document.getElementById('window-size').onchange = (e) => { maxPoints = parseInt(e.target.value); };
+    document.getElementById('y-max').onchange = (e) => { yMax = parseFloat(e.target.value); };
+
+    function startCalibration() {
+        calDuration = parseInt(document.getElementById('cal-seconds').value) || 10;
+        calActive = true;
+        calStartTime = null;
+        calBuffer = [];
+        threshold = null;
+        calBanner.style.display = 'block';
+        elThresh.textContent = '...';
+        setState('CALIBRATING');
+    }
+
+    function finishCalibration() {
+        calActive = false;
+        calBanner.style.display = 'none';
+
+        if (calBuffer.length < 10) {
+            threshold = 0.002; // fallback
+        } else {
+            const mean = calBuffer.reduce((a, b) => a + b, 0) / calBuffer.length;
+            const variance = calBuffer.reduce((a, b) => a + (b - mean) ** 2, 0) / calBuffer.length;
+            const std = Math.sqrt(variance);
+            threshold = mean + 3 * std;
+        }
+
+        // Ensure a minimum threshold so we don't get false positives from pure noise
+        threshold = Math.max(threshold, 0.0003);
+
+        elThresh.textContent = threshold.toFixed(4);
+        console.log(`Calibration done. Baseline samples: ${calBuffer.length}, Threshold: ${threshold.toFixed(6)}`);
+    }
+
+    function setState(s) {
+        const sc = STATE_COLORS[s] || STATE_COLORS['ABSENT'];
+        elState.textContent = s;
+        elState.style.color = sc.text;
+        elStateBox.style.borderColor = sc.border;
+    }
+
+    // ── WebSocket ──
+    function connect() {
+        if (ws) ws.close();
+        const port = document.getElementById('ws-port').value;
+        ws = new WebSocket(`ws://localhost:${port}`);
+        ws.onopen = () => {
+            dot.classList.add('connected');
+            startCalibration();
+        };
+        ws.onclose = () => { dot.classList.remove('connected'); };
+        ws.onerror = () => { dot.classList.remove('connected'); };
+        ws.onmessage = (e) => {
+            const msg = JSON.parse(e.data);
+            const mv = msg.mv_cv;
+            frameCount++;
+
+            values.push(mv);
+            if (values.length > maxPoints) values.shift();
+
+            elRssi.textContent = msg.rssi + ' dBm';
+            elMvcv.textContent = mv.toFixed(6);
+
+            // Calibration phase
+            if (calActive) {
+                const now = performance.now();
+                if (calStartTime === null) calStartTime = now;
+                const elapsed = (now - calStartTime) / 1000;
+
+                calBuffer.push(mv);
+                const pct = Math.min(100, (elapsed / calDuration) * 100);
+                calFill.style.width = pct + '%';
+                calText.textContent = ` (${Math.floor(elapsed)}/${calDuration}s, ${calBuffer.length} samples)`;
+
+                if (elapsed >= calDuration) {
+                    finishCalibration();
+                }
+                return;
+            }
+
+            // Classification
+            if (threshold !== null) {
+                setState(mv > threshold ? 'MOVING' : 'ABSENT');
+            }
+        };
+    }
+
+    // ── Canvas Drawing ──
+    function drawChart() {
+        const ctx = canvas.getContext('2d');
+        const dpr = window.devicePixelRatio || 1;
+        const rect = canvas.getBoundingClientRect();
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        ctx.scale(dpr, dpr);
+        const W = rect.width;
+        const H = rect.height;
+        const LEFT = 55;
+
+        ctx.clearRect(0, 0, W, H);
+
+        // Background zones (only if threshold is set)
+        if (threshold !== null) {
+            const threshY = H - (Math.min(threshold, yMax) / yMax) * H;
+
+            ctx.fillStyle = 'rgba(34, 197, 94, 0.04)';
+            ctx.fillRect(LEFT, threshY, W - LEFT, H - threshY);
+            ctx.fillStyle = 'rgba(249, 115, 22, 0.04)';
+            ctx.fillRect(LEFT, 0, W - LEFT, threshY);
+        }
+
+        // Grid
+        ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+        ctx.fillStyle = 'rgba(255,255,255,0.3)';
+        ctx.font = '11px Inter, sans-serif';
+        ctx.lineWidth = 1;
+        for (let i = 0; i <= 5; i++) {
+            const y = H - (i / 5) * H;
+            const val = (i / 5) * yMax;
+            ctx.beginPath();
+            ctx.moveTo(LEFT, y);
+            ctx.lineTo(W, y);
+            ctx.stroke();
+            ctx.fillText(val.toFixed(4), 4, y + 4);
+        }
+
+        // Threshold line
+        if (threshold !== null) {
+            const threshY = H - (Math.min(threshold, yMax) / yMax) * H;
+            ctx.strokeStyle = 'rgba(255, 107, 107, 0.8)';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([8, 4]);
+            ctx.beginPath();
+            ctx.moveTo(LEFT, threshY);
+            ctx.lineTo(W, threshY);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            ctx.fillStyle = 'rgba(255, 107, 107, 0.9)';
+            ctx.font = 'bold 11px Inter, sans-serif';
+            ctx.fillText('▸ ' + threshold.toFixed(4), W - 90, threshY - 6);
+        }
+
+        if (values.length < 2) return;
+
+        // Data line
+        const step = (W - LEFT) / (maxPoints - 1);
+        for (let i = 1; i < values.length; i++) {
+            const x0 = LEFT + (i - 1) * step;
+            const x1 = LEFT + i * step;
+            const y0 = H - (Math.min(values[i-1], yMax) / yMax) * H;
+            const y1 = H - (Math.min(values[i], yMax) / yMax) * H;
+
+            if (threshold !== null) {
+                ctx.strokeStyle = values[i] > threshold ? 'rgb(249, 115, 22)' : 'rgb(34, 197, 94)';
+            } else {
+                ctx.strokeStyle = 'rgb(255, 107, 107)';
+            }
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(x0, y0);
+            ctx.lineTo(x1, y1);
+            ctx.stroke();
+        }
+    }
+
+    // ── Render Loop ──
+    function render() {
+        const now = performance.now();
+        if (now - lastFpsTime >= 1000) {
+            elFps.textContent = frameCount - lastFpsCount;
+            lastFpsCount = frameCount;
+            lastFpsTime = now;
+        }
+        drawChart();
+        requestAnimationFrame(render);
+    }
+
+    render();
+    connect();
+</script>
+
+</body>
+</html>

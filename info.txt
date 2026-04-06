@@ -1,0 +1,17 @@
+csi_parser serve solo per leggere i dati nel modo corretto.
+csi_probe serve per testare il server
+csi_bridge fa vedere online il Moving Var CV real time
+il capture serve per fare una cattura di tot secondi
+csi_detecor
+csi_experiment serve solo per fare la cattura fra movimento e non, e validare che i dati rispettano quanto atteso
+
+NECESSARIO fare da PC sudo ping -f 192.168.1.99
+
+RECORD PART
+Record su una tab, bridge sull'altra: funzionano insieme
+Per replay, fai python3 csi_replay.py recordings/my_session.csv --ws-port 8100 e cambi il port sul bridge e ti connetti.
+record: python3 csi_record.py recordings/my_session.csv --duration 60
+
+NBVI non sembra funzionare bene, probabilmente perchè c'è troppo rumore nella stanza uqindi tutte le subcarrier sono rumorose quindi non ha senso selezionarne un tot
+
+Hampel funziona per togliere picchi di rumore su baseline

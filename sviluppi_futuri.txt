@@ -1,0 +1,55 @@
+PERFORMANCE
+
+1. Gain Lock: Il "Fermo Immagine" del Sensore
+Da fare su firmware
+
+Il Concetto Teorico
+Qualsiasi sensore che riceve un segnale analogico (che sia radio, audio o luce) ha un intervallo dinamico limitato. Per non "accecarsi" con segnali forti o "diventare sordo" con segnali deboli, utilizza un controllo automatico del guadagno (AGC). L'AGC è fondamentalmente un moltiplicatore variabile.
+Se il segnale reale in ingresso è X e il guadagno del sensore in quell'istante è G, il valore misurato dal tuo sistema sarà Y=X⋅G.
+
+Il problema è che in un sistema di rilevamento del movimento, noi cerchiamo le minuscole variazioni fisiche di X. Se il sensore cambia continuamente G a nostra insaputa per ottimizzare la ricezione, il nostro valore misurato Y oscillerà violentemente. Il Gain Lock (Blocco del Guadagno) è la procedura per trasformare G da una variabile imprevedibile a una costante fissa, k. Da quel momento in poi, qualsiasi variazione di Y corrisponderà esattamente a una variazione fisica di X.
+
+Logica di Sviluppo (Agnostica)
+Per implementare questa feature, devi pensare il tuo sistema come una Macchina a Stati Finiti (State Machine) durante la fase di boot. Non puoi semplicemente spegnere l'AGC istantaneamente, altrimenti rischieresti di bloccare il sensore su un livello di amplificazione completamente sbagliato per quella stanza.
+
+    Stato 0 - Boot & Riscaldamento: Il sistema si accende. L'AGC (il pilota automatico) è acceso.
+
+    Stato 1 - Assestamento (Warm-up Window): Il sistema attende un tempo T (es. 3-5 secondi). Durante questo periodo, il sensore ascolta l'ambiente e il suo AGC interno "cerca" il moltiplicatore perfetto per bilanciare il rumore di fondo e la potenza del segnale della stanza.
+
+    Stato 2 - Lettura del Guadagno: Il sistema interroga il sensore: "Qual è il moltiplicatore esatto che stai usando in questo millisecondo?". Salviamo questo valore in una variabile k.
+
+    Stato 3 - Congelamento (The Lock): Il sistema invia un comando al sensore: "Spegni il pilota automatico (AGC disattivato). Da ora in poi, forza il tuo amplificatore a usare esclusivamente il valore fisso k".
+
+    Stato 4 - Operatività: Il sensore inizia a inviare i dati alla tua pipeline. Ora hai un sistema di riferimento stabile.
+
+
+2. Soglia Adattiva (Adaptive Thresholding)
+
+Il Concetto Teorico
+Nel tuo attuale csi_detector.py esegui 10 secondi di baseline per calcolare la soglia ("Magic Threshold"). Questo va benissimo per un test di 5 minuti. Ma cosa succede se il sistema rimane acceso per due giorni?
+Di notte la temperatura scende (alterando leggermente le impedenze fisiche dei circuiti), di giorno qualcuno apre una porta, un router vicino cambia canale aumentando l'interferenza. La tua baseline fissa calcolata 48 ore prima diventerà obsoleta, generando falsi positivi (la soglia è rimasta troppo bassa) o falsi negativi (la soglia è rimasta troppo alta).
+
+La Soglia Adattiva è un algoritmo che "insegue" lentamente l'ambiente, aggiornando la linea di base in base alla storia recente del segnale, ma ignorando i picchi causati dal movimento reale.
+
+Logica di Sviluppo (Agnostica)
+L'architettura per una soglia adattiva richiede tre componenti logici: un Buffer Circolare, una Condizione di Guardia e un calcolo Statistico.
+
+    Il Buffer Circolare (Sliding Window): Devi creare in memoria un "serbatoio" che contenga gli ultimi N secondi di metriche di varianza (es. gli ultimi 60 secondi). Man mano che arrivano nuovi dati, quelli vecchi escono dal buffer.
+
+    La Condizione di Guardia (Anti-Poisoning):
+    Questo è il dettaglio cruciale. Non devi mai far entrare nel buffer dati che corrispondono a un movimento reale. Se la tua pipeline deduce che c'è una persona che cammina (Stato = MOTION), il buffer deve congelarsi. Perché? Se il sistema si adatta mentre qualcuno si muove, inizierà a considerare il caos del movimento come il nuovo "rumore di fondo normale". La soglia si alzerà tantissimo, rendendo la persona "invisibile". Il buffer si aggiorna solo quando lo stato è IDLE.
+
+    Il Calcolo Statistico (Il Percentile):
+    A intervalli regolari (es. ogni 10 secondi), il sistema analizza il buffer "pulito" e calcola un percentile alto, ad esempio il 95° percentile (P95​). Perché non la media? Perché anche nello stato di quiete ci possono essere minuscoli picchi spuri. Il P95​ rappresenta il limite superiore del rumore di fondo naturale, escludendo gli estremi.
+
+    Calcolo della Nuova Soglia:
+    La nuova soglia target (τtarget​) viene calcolata aggiungendo un margine di sicurezza (es. il 10%) al percentile:
+    τtarget​=P95​⋅1.1
+
+    Smorzamento (Filtro passa-basso):
+    Per evitare che la soglia faccia salti bruschi che potrebbero destabilizzare il detector, la soglia effettiva al tempo t (τt​) viene aggiornata gradualmente verso il target usando una media mobile esponenziale (dove γ è un fattore di smorzamento piccolo, es. 0.05):
+    τt​=(1−γ)⋅τt−1​+γ⋅τtarget​
+
+Con questa logica, se il rumore di base della stanza si alza molto lentamente nell'arco di un'ora, la tua soglia lieviterà morbidamente assieme a esso, mantenendo la stessa identica sensibilità al movimento netto.
+
+3. Edge computing
