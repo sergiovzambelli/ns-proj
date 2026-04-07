@@ -2,6 +2,7 @@ import socket
 import struct
 import numpy as np
 from csi_parser import parse_frame
+from csi_crypto import ENCRYPTED_MAGIC
 
 # Configuration
 UDP_IP = "0.0.0.0" # Listen on all interfaces
@@ -33,13 +34,22 @@ def start_sniffer():
                 print(f"    [INFO] Sequence:  {frame.seq}")
                 print(f"    [INFO] RSSI:      {frame.rssi} dBm")
                 print(f"    [INFO] Frequency: {frame.freq_mhz} MHz (Channel {frame.channel})")
-                
-                # Demonstrate we can see the physical signal
                 avg_amp = np.mean(frame.amplitudes)
                 print(f"    [CSI] Average Amplitude: {avg_amp:.4f}")
                 print(f"    [SECURITY ALERT] CLEAR TEXT DATA DETECTED.")
             else:
-                print(">>> Packet not recognized or potentially encrypted.")
+                is_encrypted = (
+                    len(data) >= 4 and
+                    struct.unpack_from("<I", data, 0)[0] == ENCRYPTED_MAGIC
+                )
+                if is_encrypted:
+                    print(f"    [ENCRYPTED] Data encrypted — cannot decode.")
+                    print(f"    [INFO] Sequence:  ?")
+                    print(f"    [INFO] RSSI:      ? dBm")
+                    print(f"    [INFO] Frequency: ? MHz (Channel ?)")
+                    print(f"    [CSI] Average Amplitude: ?")
+                else:
+                    print(">>> Packet not recognized.")
 
     except KeyboardInterrupt:
         print("\nSniffer stopped.")

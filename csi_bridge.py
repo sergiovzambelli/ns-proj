@@ -7,6 +7,7 @@ import socket
 import time
 import numpy as np
 import websockets
+import csi_parser
 from csi_parser import parse_frame
 
 CONNECTED = set()
@@ -66,7 +67,12 @@ class UDPReceiver(asyncio.DatagramProtocol):
 
         asyncio.ensure_future(broadcast(msg))
 
+AES_KEY = bytes.fromhex("5bb7cb4ec545f29fc6ebcba526380e26")
+
 async def main(udp_port=5005, ws_port=8099):
+    csi_parser.set_key(AES_KEY)
+    print("  AES-GCM decryption enabled.")
+
     print(f"\n  CSI Bridge — UDP :{udp_port} → WS :{ws_port}")
     print(f"  Open demo/csi_dashboard.html in your browser.\n")
 

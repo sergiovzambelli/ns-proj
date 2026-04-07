@@ -1,6 +1,14 @@
 """
 ADR-018 Frame Parser Module for ESP32 CSI frames.
 Parses raw UDP binary packets into Python objects.
+
+Supports both plaintext ADR-018 frames (magic 0xC5110001) and
+AES-128-GCM encrypted ADR-018-enc frames (magic 0xC5110003).
+
+To enable decryption, call set_key() once at startup:
+    import csi_parser
+    import os
+    csi_parser.set_key(bytes.fromhex(os.environ["CSI_AES_KEY"]))
 """
 
 import struct
@@ -8,9 +16,28 @@ import numpy as np
 from dataclasses import dataclass
 from typing import Optional
 
+from csi_crypto import decrypt_frame, ENCRYPTED_MAGIC
+
 CSI_MAGIC = 0xC5110001
 HEADER_FORMAT = "<IBBHIIBB2x"  # little-endian, 20 bytes total
 HEADER_SIZE = 20  # struct.calcsize(HEADER_FORMAT) must equal this
+
+# Module-level AES key; set via set_key() before receiving encrypted frames.
+_KEY: Optional[bytes] = None
+
+
+def set_key(key: bytes) -> None:
+    """Configure the AES-128 decryption key (16 bytes).
+
+    Call once at application startup before the receive loop.
+    Example:
+        import os, csi_parser
+        csi_parser.set_key(bytes.fromhex(os.environ["CSI_AES_KEY"]))
+    """
+    global _KEY
+    if len(key) != 16:
+        raise ValueError(f"AES-128 key must be 16 bytes, got {len(key)}")
+    _KEY = key
 
 @dataclass
 class CsiFrame:
@@ -36,13 +63,30 @@ def _freq_to_channel(freq_mhz: int) -> int:
     return 0
 
 def parse_frame(data: bytes) -> Optional[CsiFrame]:
-    """Parse a raw ADR-018 binary UDP packet into a CsiFrame.
-    
+    """Parse a raw UDP packet into a CsiFrame.
+
+    Accepts both plaintext ADR-018 (magic 0xC5110001) and encrypted
+    ADR-018-enc frames (magic 0xC5110003).  For encrypted frames, set_key()
+    must have been called beforehand; otherwise the frame is dropped.
+
     Returns None if:
-    - data is shorter than HEADER_SIZE (20 bytes)
-    - magic number doesn't match CSI_MAGIC
+    - data is too short
+    - magic number is unrecognised
+    - decryption or GCM authentication fails
     - payload is empty (0 I/Q pairs)
     """
+    if len(data) < 4:
+        return None
+
+    # Detect encrypted frames and transparently decrypt them.
+    magic_peek = struct.unpack_from("<I", data, 0)[0]
+    if magic_peek == ENCRYPTED_MAGIC:
+        if _KEY is None:
+            return None  # encrypted frame but no key configured
+        data = decrypt_frame(data, _KEY)
+        if data is None:
+            return None  # authentication failure
+
     if len(data) < HEADER_SIZE:
         return None
         

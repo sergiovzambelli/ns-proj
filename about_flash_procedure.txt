@@ -1,0 +1,193 @@
+--------------------------------------------------------------------------------
+SECTION 4 — INSTALLING ESP-IDF (native, no Docker)
+--------------------------------------------------------------------------------
+
+Requirements:
+  - Python 3.10+
+  - git
+  - Build tools
+
+Step 1 — Install system dependencies:
+  sudo apt-get install -y git wget flex bison gperf python3-pip python3-venv \
+    cmake ninja-build ccache libffi-dev libssl-dev dfu-util libusb-1.0-0
+
+Step 2 — Clone ESP-IDF v5.2:
+  mkdir -p ~/esp
+  git clone --branch v5.2 --depth 1 \
+    https://github.com/espressif/esp-idf.git ~/esp/esp-idf
+
+Step 3 — Run installer (downloads ~1 GB toolchain):
+  cd ~/esp/esp-idf
+  ./install.sh esp32s3
+
+Step 4 — Activate environment (required in every new terminal):
+  . ~/esp/esp-idf/export.sh
+  (Optionally add this line to ~/.bashrc to avoid repeating it)
+
+To uninstall later:
+  rm -rf ~/esp/esp-idf
+  rm -rf ~/.espressif
+  Remove the ". ~/esp/esp-idf/export.sh" line from ~/.bashrc if added.
+
+--------------------------------------------------------------------------------
+SECTION 5 — BUILDING THE FIRMWARE FROM SOURCE
+--------------------------------------------------------------------------------
+
+Source location:
+  RuView/firmware/esp32-csi-node/
+
+Build command (after activating ESP-IDF environment):
+  cd RuView/firmware/esp32-csi-node
+  rm -rf build sdkconfig
+  idf.py set-target esp32s3
+  idf.py build
+
+Build output (in build/):
+  build/bootloader/bootloader.bin
+  build/partition_table/partition-table.bin
+  build/esp32-csi-node.bin
+
+--- PROBLEM 1: Missing component dependencies ---
+
+ERROR:
+  fatal error: esp_wifi.h: No such file or directory
+  fatal error: nvs_flash.h: No such file or directory
+  fatal error: esp_ota_ops.h: No such file or directory
+  (and similar for other headers)
+
+CAUSE:
+  main/CMakeLists.txt had REQUIRES set to only "mbedtls". In ESP-IDF,
+  REQUIRES controls which component include paths are visible to the compiler.
+  All other components (esp_wifi, nvs_flash, lwip, etc.) were invisible.
+
+FIX — modified main/CMakeLists.txt:
+
+  BEFORE:
+    set(REQUIRES "mbedtls")
+    if(CONFIG_DISPLAY_ENABLE)
+        list(APPEND SRCS "display_hal.c" "display_ui.c" "display_task.c")
+        set(REQUIRES esp_lcd esp_lcd_touch lvgl)
+    endif()
+    idf_component_register(
+        SRCS ${SRCS}
+        INCLUDE_DIRS "."
+        REQUIRES ${REQUIRES}
+    )
+
+  AFTER:
+    set(REQUIRES
+        esp_wifi
+        esp_event
+        esp_netif
+        nvs_flash
+        esp_timer
+        app_update
+        esp_http_server
+        esp_system
+        mbedtls
+        lwip
+        driver
+        log
+    )
+    if(CONFIG_DISPLAY_ENABLE)
+        list(APPEND SRCS "display_hal.c" "display_ui.c" "display_task.c")
+        list(APPEND REQUIRES esp_lcd esp_lcd_touch lvgl)
+    endif()
+    idf_component_register(
+        SRCS ${SRCS}
+        INCLUDE_DIRS "."
+        REQUIRES ${REQUIRES}
+    )
+
+--- PROBLEM 2: Wrong component name for OTA ---
+
+ERROR:
+  CMake Error: Failed to resolve component 'esp_ota_ops'.
+
+CAUSE:
+  In ESP-IDF v5.2 the OTA component is named 'app_update', not 'esp_ota_ops'.
+  The header esp_ota_ops.h is provided by the app_update component.
+
+FIX:
+  In the REQUIRES list above, use 'app_update' (already reflected in the
+  corrected CMakeLists.txt shown above).
+
+--- PROBLEM 3: App binary too large for default partition table ---
+
+ERROR:
+  Error: app partition is too small for binary esp32-csi-node.bin size 0x10e410:
+    - Part 'factory' 0/0 @ 0x10000 size 0x100000 (overflow 0xe410)
+
+CAUSE:
+  The compiled binary is ~1.05 MB but the default ESP-IDF partition table
+  allocates only 1 MB for the factory app partition.
+
+FIX — created sdkconfig.defaults in the firmware root:
+
+  File: RuView/firmware/esp32-csi-node/sdkconfig.defaults
+  Contents:
+    CONFIG_IDF_TARGET="esp32s3"
+    CONFIG_PARTITION_TABLE_CUSTOM=y
+    CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_display.csv"
+    CONFIG_PARTITION_TABLE_OFFSET=0x8000
+    CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+    CONFIG_ESPTOOLPY_FLASHSIZE="8MB"
+
+  The repo already contains partitions_display.csv with 2 MB OTA slots:
+    nvs,      data, nvs,    0x9000,  0x6000
+    otadata,  data, ota,    0xf000,  0x2000
+    phy_init, data, phy,    0x11000, 0x1000
+    ota_0,    app,  ota_0,  0x20000, 0x200000   ← 2 MB, fits the binary
+    ota_1,    app,  ota_1,  0x220000,0x200000
+    spiffs,   data, spiffs, 0x420000,0x1E0000
+
+  After creating sdkconfig.defaults, clean and rebuild:
+    rm -rf build sdkconfig
+    idf.py set-target esp32s3
+    idf.py build
+
+--------------------------------------------------------------------------------
+SECTION 6 — FLASHING THE SELF-BUILT BINARY
+--------------------------------------------------------------------------------
+
+  esptool --chip esp32s3 --port /dev/ttyACM0 --baud 460800 \
+    write-flash --flash-mode dio --flash-size 8MB \
+    0x0     build/bootloader/bootloader.bin \
+    0x8000  build/partition_table/partition-table.bin \
+    0x20000 build/esp32-csi-node.bin
+
+NOTE: The app offset changes from 0x10000 (default factory) to 0x20000
+(ota_0) when using partitions_display.csv. Always use the offset that
+matches your partition table.
+
+Then provision and reboot as described in Section 2.
+
+--------------------------------------------------------------------------------
+SECTION 7 — SERIAL MONITOR
+--------------------------------------------------------------------------------
+
+  python -m serial.tools.miniterm /dev/ttyACM0 115200
+
+Expected output after a successful boot with encryption enabled:
+  I (321) main: ESP32-S3 CSI Node (ADR-018) — Node ID: 1
+  I (xxx) nvs_config: NVS override: ssid=...
+  I (xxx) nvs_config: NVS: aes_key loaded (xx xx...xx xx)
+  I (xxx) main: AES-GCM encryption enabled — frames sent as ADR-018-enc
+  I (xxx) main: Connected to WiFi
+  I (xxx) main: CSI streaming active → 192.168.1.93:5005
+
+--------------------------------------------------------------------------------
+SECTION 8 — FILES MODIFIED / CREATED
+--------------------------------------------------------------------------------
+
+MODIFIED:
+  RuView/firmware/esp32-csi-node/main/CMakeLists.txt
+    - Added full REQUIRES list (esp_wifi, nvs_flash, app_update, etc.)
+    - Changed display REQUIRES from set() override to list(APPEND)
+
+CREATED:
+  RuView/firmware/esp32-csi-node/sdkconfig.defaults
+    - Points build system at partitions_display.csv
+    - Sets flash size to 8MB
+
+================================================================================
