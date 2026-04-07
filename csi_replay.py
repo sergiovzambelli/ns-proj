@@ -48,20 +48,21 @@ async def replay(csv_path: str, ws_port: int, speed: float):
         input("  Press Enter to start playback...")
         print()
 
-        last_ts = None
         cv_buffer = []
         prev_amps = None
         start_time = time.time()
 
+        first_ts = float(rows[0]['timestamp'])
+        playback_start = time.time()
+
         for i, row in enumerate(rows):
             ts = float(row['timestamp'])
 
-            # Timing
-            if last_ts is not None:
-                dt = ts - last_ts
-                wait = max(0.005, min(1.0, dt)) / speed
+            # Wall-clock scheduling: compute absolute target time, avoid cumulative drift
+            target = playback_start + (ts - first_ts) / speed
+            wait = target - time.time()
+            if wait > 0.001:
                 await asyncio.sleep(wait)
-            last_ts = ts
 
             # Parse amplitudes
             n_sub = int(row['n_sub'])
